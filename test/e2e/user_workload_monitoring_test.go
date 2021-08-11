@@ -1157,30 +1157,6 @@ func assertSecretDoesNotExist(name string, namespace string) func(*testing.T) {
 	}
 }
 
-func assertEnforcedTargetLimit(limit uint64) func(*testing.T) {
-	ctx := context.Background()
-	return func(t *testing.T) {
-		err := framework.Poll(time.Second, 5*time.Minute, func() error {
-			prom, err := f.MonitoringClient.Prometheuses(f.UserWorkloadMonitoringNs).Get(ctx, "user-workload", metav1.GetOptions{})
-			if err != nil {
-				return err
-			}
-
-			if prom.Spec.EnforcedTargetLimit == nil {
-				return errors.New("EnforcedTargetLimit not set")
-			} else if *prom.Spec.EnforcedTargetLimit != limit {
-				return fmt.Errorf("expected EnforcedTargetLimit to be %d, but got %d", limit, *prom.Spec.EnforcedTargetLimit)
-			}
-
-			return nil
-		})
-
-		if err != nil {
-			t.Fatalf("Timed out waiting for EnforcedTargetLimit configuration: %v", err)
-		}
-	}
-}
-
 func updateConfigmap(cm *v1.ConfigMap) func(t *testing.T) {
 	ctx := context.Background()
 	return func(t *testing.T) {
