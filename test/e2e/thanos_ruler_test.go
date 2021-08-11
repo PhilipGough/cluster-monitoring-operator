@@ -16,16 +16,11 @@ import (
 )
 
 func TestUserWorkloadThanosRulerWithAdditionalAlertmanagers(t *testing.T) {
-	ctx := context.Background()
-	cm := &v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      clusterMonitorConfigMapName,
-			Namespace: f.Ns,
-		},
-		Data: map[string]string{
-			"config.yaml": `enableUserWorkload: true`,
-		},
-	}
+	f.SetupUserWorkloadAssets(t)
+	t.Cleanup(func() {
+		f.AssertDeletionOfUserWorkloadAssets()(t)
+		deleteAlertmanager(t)
+	})
 
 	uwmCM := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -41,6 +36,7 @@ func TestUserWorkloadThanosRulerWithAdditionalAlertmanagers(t *testing.T) {
 `,
 		},
 	}
+	f.MustCreateOrUpdateConfigMap(t, uwmCM)
 
 	testCases := []struct {
 		name      string
@@ -49,15 +45,12 @@ func TestUserWorkloadThanosRulerWithAdditionalAlertmanagers(t *testing.T) {
 		{
 			name: "Test enabling and disabling additional alertmanager configs",
 			scenarios: []scenario{
-				{"enable user workload monitoring", updateConfigmap(cm)},
-				{"assert thanos ruler rollout", assertThanosRulerDeployment},
+				{"assert thanos ruler ss exists and rollout", f.AssertStatefulSetExistsAndRollout("thanos-ruler-user-workload", f.UserWorkloadMonitoringNs)},
+				{"assert thanos ruler exists and ready", f.AssertThanosRulerIsCreated("user-workload", f.UserWorkloadMonitoringNs)},
 				{"create additional alertmanager", createAlertmanager},
-				{"configure thanos ruler with additional alertmanager", updateConfigmap(uwmCM)},
 				{"create alerting rule that always fires", createPrometheusRule},
 				{"start alertmanager port forward", startAlertmanagerPortForward},
 				{"verify alertmanager received the alert", verifyAlertmanagerAlertReceived},
-				{"delete additional alertmanager", deleteAlertmanager},
-				{"disable additional alertmanagers", assertDeletedUserWorkloadAssets(cm)},
 			},
 		},
 	}
@@ -65,14 +58,6 @@ func TestUserWorkloadThanosRulerWithAdditionalAlertmanagers(t *testing.T) {
 	for _, tt := range testCases {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			if err := f.OperatorClient.CreateOrUpdateConfigMap(ctx, cm); err != nil {
-				t.Fatal(err)
-			}
-
-			if err := f.OperatorClient.CreateOrUpdateConfigMap(ctx, uwmCM); err != nil {
-				t.Fatal(err)
-			}
-
 			for _, scenario := range tt.scenarios {
 				t.Run(scenario.name, scenario.assertion)
 			}
@@ -164,4 +149,3 @@ func deleteAlertmanager(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-

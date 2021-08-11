@@ -59,20 +59,7 @@ func TestThanosQuerierTrustedCA(t *testing.T) {
 	}
 
 	// Wait for the new hashed trusted CA bundle ConfigMap to be created
-	err = wait.Poll(time.Second, 5*time.Minute, func() (bool, error) {
-		_, err := f.KubeClient.CoreV1().ConfigMaps(f.Ns).Get(ctx, newCM.Name, metav1.GetOptions{})
-		lastErr = errors.Wrap(err, "getting new CA ConfigMap failed")
-		if err != nil {
-			return false, nil
-		}
-		return true, nil
-	})
-	if err != nil {
-		if err == wait.ErrWaitTimeout && lastErr != nil {
-			err = lastErr
-		}
-		t.Fatal(err)
-	}
+	f.AssertSecretExists(newCM.Name, f.Ns)(t)
 
 	// Get Thanos Querier Deployment and make sure it has a volume mounted.
 	err = wait.Poll(time.Second, 5*time.Minute, func() (bool, error) {

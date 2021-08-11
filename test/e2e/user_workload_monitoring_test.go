@@ -31,8 +31,6 @@ import (
 	"github.com/Jeffail/gabs"
 	"github.com/openshift/cluster-monitoring-operator/test/e2e/framework"
 	"github.com/pkg/errors"
-	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
-	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,7 +44,7 @@ const (
 
 type scenario struct {
 	name      string
-	assertion func(*testing.T)
+	assertion framework.AssertionFunc
 }
 
 func TestUserWorkloadMonitoringMetrics(t *testing.T) {
@@ -76,32 +74,29 @@ func TestUserWorkloadMonitoringMetrics(t *testing.T) {
 	f.AssertStatefulSetExistsAndRollout("prometheus-user-workload", f.UserWorkloadMonitoringNs)(t)
 	f.SetupUserApplication(t)
 
-	for _, scenario := range []struct {
-		name string
-		f    func(*testing.T)
-	}{
+	for _, test := range []scenario{
 		{
-			name: "assert metrics for user workload components",
-			f:    assertMetricsForMonitoringComponents,
+			name:      "assert metrics for user workload components",
+			assertion: assertMetricsForMonitoringComponents,
 		},
 		{
-			name: "assert user workload metrics",
-			f:    assertUserWorkloadMetrics,
+			name:      "assert user workload metrics",
+			assertion: assertUserWorkloadMetrics,
 		},
 		{
-			name: "assert tenancy model is enforced for metrics",
-			f:    assertTenancyForMetrics,
+			name:      "assert tenancy model is enforced for metrics",
+			assertion: assertTenancyForMetrics,
 		},
 		{
-			name: "assert prometheus is not deployed in user namespace",
-			f:    f.AssertStatefulsetDoesNotExist("prometheus-not-to-be-reconciled", userWorkloadTestNs),
+			name:      "assert prometheus is not deployed in user namespace",
+			assertion: f.AssertStatefulsetDoesNotExist("prometheus-not-to-be-reconciled", userWorkloadTestNs),
 		},
 		{
-			name: "assert alertmanager is not deployed in user namespace",
-			f:    f.AssertStatefulsetDoesNotExist("alertmanager-not-to-be-reconciled", userWorkloadTestNs),
+			name:      "assert alertmanager is not deployed in user namespace",
+			assertion: f.AssertStatefulsetDoesNotExist("alertmanager-not-to-be-reconciled", userWorkloadTestNs),
 		},
 	} {
-		t.Run(scenario.name, scenario.f)
+		t.Run(test.name, test.assertion)
 	}
 }
 
@@ -132,28 +127,25 @@ func TestUserWorkloadMonitoringAlerting(t *testing.T) {
 	f.AssertStatefulSetExistsAndRollout("prometheus-user-workload", f.UserWorkloadMonitoringNs)(t)
 	f.SetupUserApplication(t)
 
-	for _, scenario := range []struct {
-		name string
-		f    func(*testing.T)
-	}{
+	for _, test := range []scenario{
 		{
-			name: "assert user workload rules",
-			f:    assertUserWorkloadRules,
+			name:      "assert user workload rules",
+			assertion: assertUserWorkloadRules,
 		},
 		{
-			name: "assert tenancy model is enforced for rules",
-			f:    assertTenancyForRules,
+			name:      "assert tenancy model is enforced for rules",
+			assertion: assertTenancyForRules,
 		},
 		{
-			name: "assert prometheus is not deployed in user namespace",
-			f:    f.AssertStatefulsetDoesNotExist("prometheus-not-to-be-reconciled", userWorkloadTestNs),
+			name:      "assert prometheus is not deployed in user namespace",
+			assertion: f.AssertStatefulsetDoesNotExist("prometheus-not-to-be-reconciled", userWorkloadTestNs),
 		},
 		{
-			name: "assert alertmanager is not deployed in user namespace",
-			f:    f.AssertStatefulsetDoesNotExist("alertmanager-not-to-be-reconciled", userWorkloadTestNs),
+			name:      "assert alertmanager is not deployed in user namespace",
+			assertion: f.AssertStatefulsetDoesNotExist("alertmanager-not-to-be-reconciled", userWorkloadTestNs),
 		},
 	} {
-		t.Run(scenario.name, scenario.f)
+		t.Run(test.name, test.assertion)
 	}
 }
 
@@ -182,13 +174,10 @@ func TestUserWorkloadMonitoringGrpcSecrets(t *testing.T) {
 
 	f.MustCreateOrUpdateConfigMap(t, uwmCM)
 
-	for _, scenario := range []struct {
-		name string
-		f    func(*testing.T)
-	}{
+	for _, test := range []scenario{
 		{"assert grpc tls rotation", assertGRPCTLSRotation},
 	} {
-		t.Run(scenario.name, scenario.f)
+		t.Run(test.name, test.assertion)
 	}
 }
 
@@ -235,7 +224,7 @@ func TestUserWorkloadMonitoringWithAdditionalAlertmanagerConfigs(t *testing.T) {
 	scenarios := []scenario{
 		{"assert 5 alertmanagers are discovered (3 built-in and 2 from the additional configs)", assertAlertmanagerInstancesDiscovered(5)},
 		{"disable additional alertmanagers", disableAdditionalAlertmanagerConfigs},
-		{"assert additional-alertmanager-configs secret is deleted", assertSecretDoesNotExist(manifests.PrometheusUWAdditionalAlertmanagerConfigSecretName, f.UserWorkloadMonitoringNs)},
+		{"assert additional-alertmanager-configs secret is deleted", f.AssertSecretDoesNotExist(manifests.PrometheusUWAdditionalAlertmanagerConfigSecretName, f.UserWorkloadMonitoringNs)},
 		{"assert 3 alertmanagers are discovered", assertAlertmanagerInstancesDiscovered(3)},
 	}
 
@@ -273,42 +262,6 @@ func createSelfSignedCertificateSecret(secretName string) error {
 	}
 
 	return nil
-}
-
-func assertThanosRulerDeployment(t *testing.T) {
-	ctx := context.Background()
-	err := framework.Poll(time.Second, 5*time.Minute, func() error {
-		_, err := f.KubeClient.AppsV1().StatefulSets(f.UserWorkloadMonitoringNs).Get(ctx, "thanos-ruler-user-workload", metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = f.OperatorClient.WaitForThanosRuler(ctx, &monitoringv1.ThanosRuler{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "user-workload",
-			Namespace: f.UserWorkloadMonitoringNs,
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = f.OperatorClient.WaitForStatefulsetRollout(ctx, &appsv1.StatefulSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "thanos-ruler-user-workload",
-			Namespace: f.UserWorkloadMonitoringNs,
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
 }
 
 func assertMetricsForMonitoringComponents(t *testing.T) {
@@ -350,7 +303,6 @@ func assertAlertmanagerInstancesDiscovered(expectedInstances int) func(_ *testin
 }
 
 func disableAdditionalAlertmanagerConfigs(t *testing.T) {
-	ctx := context.Background()
 	uwmCM := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      userWorkloadMonitorConfigMapName,
@@ -360,10 +312,8 @@ func disableAdditionalAlertmanagerConfigs(t *testing.T) {
 			"config.yaml": `prometheus: {}`,
 		},
 	}
+	f.MustCreateOrUpdateConfigMap(t, uwmCM)
 
-	if err := f.OperatorClient.CreateOrUpdateConfigMap(ctx, uwmCM); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func assertUserWorkloadMetrics(t *testing.T) {
@@ -894,82 +844,5 @@ func assertGRPCTLSRotation(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-}
-
-func assertDeletedUserWorkloadAssets(cm *v1.ConfigMap) func(*testing.T) {
-	ctx := context.Background()
-	return func(t *testing.T) {
-		err := f.OperatorClient.DeleteConfigMap(ctx, cm)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		err = framework.Poll(time.Second, 10*time.Minute, func() error {
-			_, err := f.KubeClient.AppsV1().Deployments(f.UserWorkloadMonitoringNs).Get(ctx, "prometheus-operator", metav1.GetOptions{})
-			if err == nil {
-				return errors.New("prometheus-operator deployment not deleted")
-			}
-			if apierrors.IsNotFound(err) {
-				return nil
-			}
-			return err
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		err = framework.Poll(time.Second, 10*time.Minute, func() error {
-			_, err := f.KubeClient.AppsV1().StatefulSets(f.UserWorkloadMonitoringNs).Get(ctx, "prometheus-user-workload", metav1.GetOptions{})
-			if err == nil {
-				return errors.New("prometheus statefulset not deleted")
-			}
-			if apierrors.IsNotFound(err) {
-				return nil
-			}
-			return err
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		err = framework.Poll(time.Second, 10*time.Minute, func() error {
-			_, err := f.KubeClient.CoreV1().Secrets(f.UserWorkloadMonitoringNs).Get(ctx, manifests.PrometheusUWAdditionalAlertmanagerConfigSecretName, metav1.GetOptions{})
-			if err == nil {
-				return fmt.Errorf("secret %s/%s not deleted", manifests.PrometheusUWAdditionalAlertmanagerConfigSecretName, f.UserWorkloadMonitoringNs)
-			}
-			if apierrors.IsNotFound(err) {
-				return nil
-			}
-			return err
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func assertSecretDoesNotExist(name string, namespace string) func(*testing.T) {
-	ctx := context.Background()
-	return func(t *testing.T) {
-		if err := framework.Poll(5*time.Second, 10*time.Minute, func() error {
-			_, err := f.OperatorClient.GetSecret(ctx, namespace, name)
-			if err == nil || apierrors.IsNotFound(err) {
-				return nil
-			}
-
-			return err
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func updateConfigmap(cm *v1.ConfigMap) func(t *testing.T) {
-	ctx := context.Background()
-	return func(t *testing.T) {
-		if err := f.OperatorClient.CreateOrUpdateConfigMap(ctx, cm); err != nil {
-			t.Fatal(err)
-		}
 	}
 }

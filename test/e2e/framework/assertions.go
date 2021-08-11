@@ -329,27 +329,27 @@ func (f *Framework) AssertPodConfiguration(namespace, labelSelector string, asse
 	}
 }
 
-func (f *Framework) AssertOperatorCondition(t *testing.T, conditionType configv1.ClusterStatusConditionType, conditionStatus configv1.ConditionStatus) {
-	t.Helper()
-
-	reporter := f.OperatorClient.StatusReporter()
-	err := Poll(time.Second, 5*time.Minute, func() error {
-		co, err := reporter.Get(ctx)
+func (f *Framework) AssertOperatorCondition(conditionType configv1.ClusterStatusConditionType, conditionStatus configv1.ConditionStatus) AssertionFunc {
+	return func(t *testing.T) {
+		reporter := f.OperatorClient.StatusReporter()
+		err := Poll(time.Second, 5*time.Minute, func() error {
+			co, err := reporter.Get(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, c := range co.Status.Conditions {
+				if c.Type == conditionType {
+					if c.Status == conditionStatus {
+						return nil
+					}
+					return fmt.Errorf("expecting condition %q to be %q, got %q", conditionType, conditionStatus, c.Status)
+				}
+			}
+			return fmt.Errorf("failed to find condition %q", conditionType)
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, c := range co.Status.Conditions {
-			if c.Type == conditionType {
-				if c.Status == conditionStatus {
-					return nil
-				}
-				return fmt.Errorf("expecting condition %q to be %q, got %q", conditionType, conditionStatus, c.Status)
-			}
-		}
-		return fmt.Errorf("failed to find condition %q", conditionType)
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }
 
